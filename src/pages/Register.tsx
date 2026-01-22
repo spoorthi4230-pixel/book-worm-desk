@@ -195,7 +195,10 @@ const Register = () => {
 
       if (uploadError) {
         // Continue even if upload fails - profile can still be created
-        console.error('Photo upload error:', uploadError);
+        // Log generic message to avoid exposing internal details
+        if (import.meta.env.DEV) {
+          console.error('Photo upload failed');
+        }
       }
 
       // 3. Create profile in database
@@ -237,7 +240,10 @@ const Register = () => {
 
       if (roleError) {
         // Non-critical error - user can still use the system
-        console.error('Role assignment error:', roleError);
+        // Only log in development mode without exposing internal details
+        if (import.meta.env.DEV) {
+          console.error('Role assignment failed');
+        }
       }
 
       toast({
