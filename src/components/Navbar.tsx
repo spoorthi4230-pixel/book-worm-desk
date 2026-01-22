@@ -25,10 +25,7 @@ export const Navbar = () => {
           </div>
           <div className="flex flex-col">
             <span className="font-serif text-lg font-bold text-foreground leading-tight">
-              LibraryHub
-            </span>
-            <span className="text-xs text-muted-foreground leading-tight">
-              Knowledge Gateway
+              Velvet
             </span>
           </div>
         </Link>

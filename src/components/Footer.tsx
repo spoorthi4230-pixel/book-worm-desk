@@ -14,10 +14,7 @@ export const Footer = () => {
               </div>
               <div className="flex flex-col">
                 <span className="font-serif text-lg font-bold leading-tight">
-                  LibraryHub
-                </span>
-                <span className="text-xs text-primary-foreground/70 leading-tight">
-                  Knowledge Gateway
+                  Velvet
                 </span>
               </div>
             </div>
@@ -101,7 +98,7 @@ export const Footer = () => {
         </div>
 
         <div className="border-t border-primary-foreground/20 mt-8 pt-8 text-center text-sm text-primary-foreground/60">
-          <p>© {new Date().getFullYear()} LibraryHub. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} Velvet. All rights reserved.</p>
         </div>
       </div>
     </footer>
