@@ -9,7 +9,8 @@ export interface Book {
   author: string;
   category: string;
   available: boolean;
-  coverColor?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 interface BookCardProps {
@@ -37,7 +38,9 @@ const bookCoverColors = [
 ];
 
 export const BookCard = ({ book, onClick }: BookCardProps) => {
-  const coverColor = book.coverColor || bookCoverColors[parseInt(book.id) % bookCoverColors.length];
+  // Use a hash of the id for consistent color assignment
+  const hashCode = book.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const coverColor = bookCoverColors[hashCode % bookCoverColors.length];
   const categoryColor = categoryColors[book.category] || "bg-muted text-muted-foreground";
 
   return (

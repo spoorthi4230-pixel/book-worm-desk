@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Book,
   Users,
@@ -9,6 +9,7 @@ import {
   Search,
   BookCheck,
   BarChart3,
+  Loader2,
 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
@@ -42,41 +43,133 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { mockBooks, categories } from "@/data/mockBooks";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import { Book as BookType } from "@/components/BookCard";
 
-const mockUsers = [
-  { id: "USR1001", name: "John Doe", email: "john@university.edu", department: "Computer Science", booksIssued: 2 },
-  { id: "USR1002", name: "Jane Smith", email: "jane@university.edu", department: "Mathematics", booksIssued: 1 },
-  { id: "USR1003", name: "Mike Johnson", email: "mike@university.edu", department: "Physics", booksIssued: 0 },
+const categories = [
+  "Fiction",
+  "Science",
+  "Technology",
+  "History",
+  "Philosophy",
+  "Arts",
+  "Mathematics",
 ];
 
-const mockTransactions = [
-  { id: 1, bookCode: "LIB003", userId: "USR1001", type: "issue", date: "2024-01-15", dueDate: "2024-01-29" },
-  { id: 2, bookCode: "LIB006", userId: "USR1002", type: "issue", date: "2024-01-14", dueDate: "2024-01-28" },
-  { id: 3, bookCode: "LIB010", userId: "USR1001", type: "issue", date: "2024-01-10", dueDate: "2024-01-24" },
-  { id: 4, bookCode: "LIB002", userId: "USR1003", type: "return", date: "2024-01-12", returnedDate: "2024-01-12" },
-];
+interface Profile {
+  id: string;
+  full_name: string;
+  email: string;
+  usn: string;
+  phone: string | null;
+  photo_id_status: string | null;
+}
+
+interface Transaction {
+  id: string;
+  book_id: string;
+  user_id: string;
+  profile_id: string;
+  type: string;
+  issue_date: string;
+  due_date: string | null;
+  return_date: string | null;
+  created_at: string;
+  book_code?: string;
+  book_name?: string;
+  user_name?: string;
+  user_usn?: string;
+}
 
 const Admin = () => {
   const { toast } = useToast();
-  const [books, setBooks] = useState(mockBooks);
+  const [books, setBooks] = useState<BookType[]>([]);
+  const [users, setUsers] = useState<Profile[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddBookOpen, setIsAddBookOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [newBook, setNewBook] = useState({
     name: "",
     author: "",
     category: "",
   });
 
-  const generateBookCode = () => {
-    const maxCode = Math.max(
-      ...books.map((b) => parseInt(b.code.replace("LIB", "")))
-    );
-    return `LIB${String(maxCode + 1).padStart(3, "0")}`;
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    setIsLoading(true);
+    
+    // Fetch books - use type assertion for new table
+    const { data: booksData } = await (supabase
+      .from("books" as "profiles")
+      .select("*")
+      .order("code", { ascending: true }) as unknown as Promise<{ data: BookType[] | null; error: Error | null }>);
+    
+    // Fetch users (profiles)
+    const { data: usersData } = await supabase
+      .from("profiles")
+      .select("id, full_name, email, usn, phone, photo_id_status")
+      .order("created_at", { ascending: false });
+    
+    // Fetch transactions - simplified approach, fetch separately and join in memory
+    interface RawTransaction {
+      id: string;
+      book_id: string;
+      user_id: string;
+      profile_id: string;
+      type: string;
+      issue_date: string;
+      due_date: string | null;
+      return_date: string | null;
+      created_at: string;
+    }
+    
+    const { data: transactionsData } = await (supabase
+      .from("book_transactions" as "profiles")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(50) as unknown as Promise<{ data: RawTransaction[] | null; error: Error | null }>);
+
+    // Enrich transactions with book and user info
+    const enrichedTransactions: Transaction[] = (transactionsData || []).map(tx => {
+      const book = booksData?.find(b => b.id === tx.book_id);
+      const user = usersData?.find(u => u.id === tx.profile_id);
+      return {
+        ...tx,
+        book_code: book?.code,
+        book_name: book?.name,
+        user_name: user?.full_name,
+        user_usn: user?.usn,
+      };
+    });
+
+    setBooks(booksData || []);
+    setUsers(usersData || []);
+    setTransactions(enrichedTransactions);
+    setIsLoading(false);
   };
 
-  const handleAddBook = () => {
+  const generateBookCode = async () => {
+    const { data } = await (supabase
+      .from("books" as "profiles")
+      .select("code")
+      .order("code", { ascending: false })
+      .limit(1) as unknown as Promise<{ data: { code: string }[] | null; error: Error | null }>);
+    
+    if (data && data.length > 0) {
+      const lastCode = data[0].code;
+      const num = parseInt(lastCode.replace("LIB", "")) + 1;
+      return `LIB${String(num).padStart(3, "0")}`;
+    }
+    return "LIB001";
+  };
+
+  const handleAddBook = async () => {
     if (!newBook.name || !newBook.author || !newBook.category) {
       toast({
         title: "Error",
@@ -86,31 +179,63 @@ const Admin = () => {
       return;
     }
 
-    const code = generateBookCode();
-    const book = {
-      id: String(books.length + 1),
-      code,
-      name: newBook.name,
-      author: newBook.author,
-      category: newBook.category,
-      available: true,
-    };
+    setIsSaving(true);
 
-    setBooks([...books, book]);
-    setNewBook({ name: "", author: "", category: "" });
-    setIsAddBookOpen(false);
-    toast({
-      title: "Book Added Successfully",
-      description: `"${book.name}" has been added with code ${code}`,
-    });
+    try {
+      const code = await generateBookCode();
+      
+      const bookInsert = supabase
+        .from("books" as "profiles")
+        .insert([{
+          code,
+          name: newBook.name.trim(),
+          author: newBook.author.trim(),
+          category: newBook.category,
+          available: true,
+        }] as never);
+      
+      const { error } = await (bookInsert as unknown as Promise<{ error: Error | null }>);
+
+      if (error) throw error;
+
+      toast({
+        title: "Book Added Successfully",
+        description: `"${newBook.name}" has been added with code ${code}`,
+      });
+
+      setNewBook({ name: "", author: "", category: "" });
+      setIsAddBookOpen(false);
+      fetchData();
+    } catch {
+      toast({
+        title: "Error",
+        description: "Could not add the book. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleDeleteBook = (id: string) => {
-    setBooks(books.filter((b) => b.id !== id));
-    toast({
-      title: "Book Deleted",
-      description: "The book has been removed from the catalog",
-    });
+  const handleDeleteBook = async (id: string, name: string) => {
+    const { error } = await (supabase
+      .from("books" as "profiles")
+      .delete()
+      .eq("id", id) as unknown as Promise<{ error: Error | null }>);
+
+    if (error) {
+      toast({
+        title: "Error",
+        description: "Could not delete the book. It may have active transactions.",
+        variant: "destructive",
+      });
+    } else {
+      toast({
+        title: "Book Deleted",
+        description: `"${name}" has been removed from the catalog`,
+      });
+      fetchData();
+    }
   };
 
   const filteredBooks = books.filter(
@@ -124,8 +249,20 @@ const Admin = () => {
     { label: "Total Books", value: books.length, icon: Book, color: "text-primary" },
     { label: "Available", value: books.filter((b) => b.available).length, icon: BookCheck, color: "text-success" },
     { label: "Issued", value: books.filter((b) => !b.available).length, icon: BookOpen, color: "text-warning" },
-    { label: "Users", value: mockUsers.length, icon: Users, color: "text-accent" },
+    { label: "Users", value: users.length, icon: Users, color: "text-accent" },
   ];
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex flex-col bg-background">
+        <Navbar />
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+        <Footer />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -252,13 +389,11 @@ const Admin = () => {
                               <SelectValue placeholder="Select category" />
                             </SelectTrigger>
                             <SelectContent>
-                              {categories
-                                .filter((c) => c !== "All")
-                                .map((category) => (
-                                  <SelectItem key={category} value={category}>
-                                    {category}
-                                  </SelectItem>
-                                ))}
+                              {categories.map((category) => (
+                                <SelectItem key={category} value={category}>
+                                  {category}
+                                </SelectItem>
+                              ))}
                             </SelectContent>
                           </Select>
                         </div>
@@ -270,7 +405,9 @@ const Admin = () => {
                         >
                           Cancel
                         </Button>
-                        <Button onClick={handleAddBook}>Add Book</Button>
+                        <Button onClick={handleAddBook} disabled={isSaving}>
+                          {isSaving ? "Adding..." : "Add Book"}
+                        </Button>
                       </DialogFooter>
                     </DialogContent>
                   </Dialog>
@@ -319,7 +456,7 @@ const Admin = () => {
                                 variant="ghost"
                                 size="icon"
                                 className="text-destructive hover:text-destructive"
-                                onClick={() => handleDeleteBook(book.id)}
+                                onClick={() => handleDeleteBook(book.id, book.name)}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -340,27 +477,38 @@ const Admin = () => {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>User ID</TableHead>
+                        <TableHead>USN</TableHead>
                         <TableHead>Name</TableHead>
                         <TableHead>Email</TableHead>
-                        <TableHead>Department</TableHead>
-                        <TableHead>Books Issued</TableHead>
+                        <TableHead>Phone</TableHead>
+                        <TableHead>ID Status</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {mockUsers.map((user) => (
+                      {users.map((user) => (
                         <TableRow key={user.id}>
-                          <TableCell className="font-mono">{user.id}</TableCell>
+                          <TableCell className="font-mono">{user.usn}</TableCell>
                           <TableCell className="font-medium">
-                            {user.name}
+                            {user.full_name}
                           </TableCell>
                           <TableCell>{user.email}</TableCell>
-                          <TableCell>{user.department}</TableCell>
+                          <TableCell>{user.phone || "-"}</TableCell>
                           <TableCell>
-                            <Badge variant="secondary">{user.booksIssued}</Badge>
+                            <Badge 
+                              variant={user.photo_id_status === "verified" ? "default" : "secondary"}
+                            >
+                              {user.photo_id_status || "pending"}
+                            </Badge>
                           </TableCell>
                         </TableRow>
                       ))}
+                      {users.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                            No users registered yet.
+                          </TableCell>
+                        </TableRow>
+                      )}
                     </TableBody>
                   </Table>
                 </div>
@@ -375,19 +523,28 @@ const Admin = () => {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Book Code</TableHead>
-                        <TableHead>User ID</TableHead>
+                        <TableHead>Book Name</TableHead>
+                        <TableHead>User</TableHead>
                         <TableHead>Type</TableHead>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Due/Returned</TableHead>
+                        <TableHead>Issue Date</TableHead>
+                        <TableHead>Due/Return Date</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {mockTransactions.map((tx) => (
+                      {transactions.map((tx) => (
                         <TableRow key={tx.id}>
                           <TableCell className="font-mono">
-                            {tx.bookCode}
+                            {tx.book_code || "-"}
                           </TableCell>
-                          <TableCell className="font-mono">{tx.userId}</TableCell>
+                          <TableCell className="font-medium">
+                            {tx.book_name || "-"}
+                          </TableCell>
+                          <TableCell>
+                            {tx.user_name || "-"}
+                            <span className="text-xs text-muted-foreground block">
+                              {tx.user_usn}
+                            </span>
+                          </TableCell>
                           <TableCell>
                             <Badge
                               variant={
@@ -397,12 +554,24 @@ const Admin = () => {
                               {tx.type === "issue" ? "Issued" : "Returned"}
                             </Badge>
                           </TableCell>
-                          <TableCell>{tx.date}</TableCell>
                           <TableCell>
-                            {tx.type === "issue" ? tx.dueDate : tx.returnedDate}
+                            {new Date(tx.issue_date).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>
+                            {tx.type === "issue" 
+                              ? tx.due_date ? new Date(tx.due_date).toLocaleDateString() : "-"
+                              : tx.return_date ? new Date(tx.return_date).toLocaleDateString() : "-"
+                            }
                           </TableCell>
                         </TableRow>
                       ))}
+                      {transactions.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                            No transactions yet.
+                          </TableCell>
+                        </TableRow>
+                      )}
                     </TableBody>
                   </Table>
                 </div>

@@ -14,6 +14,90 @@ export type Database = {
   }
   public: {
     Tables: {
+      book_transactions: {
+        Row: {
+          book_id: string
+          created_at: string
+          due_date: string | null
+          id: string
+          issue_date: string
+          profile_id: string
+          return_date: string | null
+          type: string
+          user_id: string
+        }
+        Insert: {
+          book_id: string
+          created_at?: string
+          due_date?: string | null
+          id?: string
+          issue_date: string
+          profile_id: string
+          return_date?: string | null
+          type: string
+          user_id: string
+        }
+        Update: {
+          book_id?: string
+          created_at?: string
+          due_date?: string | null
+          id?: string
+          issue_date?: string
+          profile_id?: string
+          return_date?: string | null
+          type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "book_transactions_book_id_fkey"
+            columns: ["book_id"]
+            isOneToOne: false
+            referencedRelation: "books"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "book_transactions_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      books: {
+        Row: {
+          author: string
+          available: boolean
+          category: string
+          code: string
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          author: string
+          available?: boolean
+          category: string
+          code: string
+          created_at?: string
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          author?: string
+          available?: boolean
+          category?: string
+          code?: string
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
