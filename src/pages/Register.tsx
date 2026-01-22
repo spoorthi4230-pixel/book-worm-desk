@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { User, Mail, Phone, Building, Lock, ArrowRight, IdCard, Upload, X, FileCheck } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
@@ -14,6 +14,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import { z } from "zod";
 
 const departments = [
   "Computer Science",
@@ -26,6 +28,20 @@ const departments = [
   "Mathematics",
   "Other",
 ];
+
+// Validation schema
+const registrationSchema = z.object({
+  name: z.string().min(2, "Name must be at least 2 characters").max(100, "Name is too long"),
+  usn: z.string().regex(/^[0-9]{1}[A-Z]{2}[0-9]{2}[A-Z]{2}[0-9]{3}$/i, "Invalid USN format (e.g., 1XX21CS001)"),
+  email: z.string().email("Please enter a valid email address").max(255, "Email is too long"),
+  phone: z.string().min(10, "Phone number must be at least 10 digits").max(20, "Phone number is too long"),
+  department: z.string().min(1, "Please select a department"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+  confirmPassword: z.string(),
+}).refine((data) => data.password === data.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
+});
 
 const Register = () => {
   const navigate = useNavigate();
@@ -44,17 +60,16 @@ const Register = () => {
   const [photoIdFile, setPhotoIdFile] = useState<File | null>(null);
   const [photoIdPreview, setPhotoIdPreview] = useState<string | null>(null);
 
-  const generateUserId = () => {
-    const prefix = "USR";
-    const randomNum = Math.floor(1000 + Math.random() * 9000);
-    return `${prefix}${randomNum}`;
-  };
-
-  const validateUSN = (usn: string) => {
-    // USN format: typically like 1XX21CS001 (institution code + year + branch + roll number)
-    const usnPattern = /^[0-9]{1}[A-Z]{2}[0-9]{2}[A-Z]{2}[0-9]{3}$/i;
-    return usnPattern.test(usn);
-  };
+  // Check if user is already logged in
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        navigate("/");
+      }
+    };
+    checkAuth();
+  }, [navigate]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -106,11 +121,12 @@ const Register = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validate USN format
-    if (!validateUSN(formData.usn)) {
+    // Validate form data
+    const validation = registrationSchema.safeParse(formData);
+    if (!validation.success) {
       toast({
-        title: "Invalid USN",
-        description: "Please enter a valid University Serial Number (e.g., 1XX21CS001)",
+        title: "Validation Error",
+        description: validation.error.errors[0].message,
         variant: "destructive",
       });
       return;
@@ -125,28 +141,120 @@ const Register = () => {
       });
       return;
     }
-    
-    if (formData.password !== formData.confirmPassword) {
-      toast({
-        title: "Error",
-        description: "Passwords do not match",
-        variant: "destructive",
-      });
-      return;
-    }
 
     setIsLoading(true);
 
-    // Simulate registration
-    setTimeout(() => {
-      const userId = generateUserId();
+    try {
+      // 1. Create auth user
+      const redirectUrl = `${window.location.origin}/login`;
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: formData.email,
+        password: formData.password,
+        options: {
+          emailRedirectTo: redirectUrl,
+        },
+      });
+
+      if (authError) {
+        let errorMessage = "Registration failed. Please try again.";
+        if (authError.message.includes("already registered")) {
+          errorMessage = "This email is already registered. Please try logging in.";
+        } else if (authError.message.includes("valid email")) {
+          errorMessage = "Please enter a valid email address.";
+        }
+        
+        toast({
+          title: "Registration Failed",
+          description: errorMessage,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (!authData.user) {
+        toast({
+          title: "Registration Failed",
+          description: "Could not create user account. Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const userId = authData.user.id;
+
+      // 2. Upload photo ID to storage
+      const fileExt = photoIdFile.name.split('.').pop();
+      const filePath = `${userId}/${Date.now()}.${fileExt}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from('photo-ids')
+        .upload(filePath, photoIdFile, {
+          cacheControl: '3600',
+          upsert: false,
+        });
+
+      if (uploadError) {
+        // Continue even if upload fails - profile can still be created
+        console.error('Photo upload error:', uploadError);
+      }
+
+      // 3. Create profile in database
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .insert({
+          user_id: userId,
+          full_name: formData.name.trim(),
+          usn: formData.usn.toUpperCase(),
+          email: formData.email.toLowerCase().trim(),
+          phone: formData.phone.trim(),
+          photo_id_path: uploadError ? null : filePath,
+          photo_id_status: 'pending',
+        });
+
+      if (profileError) {
+        let errorMessage = "Could not create profile. Please contact support.";
+        if (profileError.message.includes("usn_format") || profileError.message.includes("usn")) {
+          errorMessage = "Invalid USN format. Please use format like 1XX21CS001.";
+        } else if (profileError.message.includes("unique") || profileError.message.includes("duplicate")) {
+          errorMessage = "This USN is already registered. Please check your USN.";
+        }
+        
+        toast({
+          title: "Profile Creation Failed",
+          description: errorMessage,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // 4. Create user_roles entry (default role is 'user')
+      const { error: roleError } = await supabase
+        .from('user_roles')
+        .insert({
+          user_id: userId,
+          role: 'user',
+        });
+
+      if (roleError) {
+        // Non-critical error - user can still use the system
+        console.error('Role assignment error:', roleError);
+      }
+
       toast({
         title: "Registration Successful!",
-        description: `Your User ID is: ${userId}. Your photo ID is pending verification.`,
+        description: "Your account has been created. Your photo ID is pending verification.",
       });
-      setIsLoading(false);
+      
       navigate("/login");
-    }, 1500);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "An unexpected error occurred. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (

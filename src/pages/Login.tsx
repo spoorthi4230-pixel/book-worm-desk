@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { Mail, Lock, ArrowRight, Shield, User } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
@@ -8,6 +8,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import { z } from "zod";
+
+// Validation schemas
+const loginSchema = z.object({
+  email: z.string().email("Please enter a valid email address"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+});
 
 const Login = () => {
   const navigate = useNavigate();
@@ -16,34 +24,154 @@ const Login = () => {
   const [userForm, setUserForm] = useState({ email: "", password: "" });
   const [adminForm, setAdminForm] = useState({ email: "", password: "" });
 
+  // Check if user is already logged in
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        // Check if user is admin
+        const { data: roles } = await supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", session.user.id)
+          .single();
+        
+        if (roles?.role === "admin") {
+          navigate("/admin");
+        } else {
+          navigate("/");
+        }
+      }
+    };
+    checkAuth();
+  }, [navigate]);
+
   const handleUserLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate input
+    const validation = loginSchema.safeParse(userForm);
+    if (!validation.success) {
+      toast({
+        title: "Validation Error",
+        description: validation.error.errors[0].message,
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsLoading(true);
 
-    // Simulate login
-    setTimeout(() => {
-      toast({
-        title: "Login Successful",
-        description: "Welcome back to LibraryHub!",
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: userForm.email,
+        password: userForm.password,
       });
+
+      if (error) {
+        let errorMessage = "Login failed. Please check your credentials.";
+        if (error.message.includes("Invalid login credentials")) {
+          errorMessage = "Invalid email or password. Please try again.";
+        } else if (error.message.includes("Email not confirmed")) {
+          errorMessage = "Please verify your email address before logging in.";
+        }
+        
+        toast({
+          title: "Login Failed",
+          description: errorMessage,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (data.user) {
+        toast({
+          title: "Login Successful",
+          description: "Welcome back to Velvet Page!",
+        });
+        navigate("/");
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "An unexpected error occurred. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
       setIsLoading(false);
-      navigate("/");
-    }, 1500);
+    }
   };
 
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate input
+    const validation = loginSchema.safeParse(adminForm);
+    if (!validation.success) {
+      toast({
+        title: "Validation Error",
+        description: validation.error.errors[0].message,
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsLoading(true);
 
-    // Simulate admin login
-    setTimeout(() => {
-      toast({
-        title: "Admin Login Successful",
-        description: "Welcome to the Admin Dashboard!",
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: adminForm.email,
+        password: adminForm.password,
       });
+
+      if (error) {
+        let errorMessage = "Login failed. Please check your credentials.";
+        if (error.message.includes("Invalid login credentials")) {
+          errorMessage = "Invalid email or password. Please try again.";
+        }
+        
+        toast({
+          title: "Login Failed",
+          description: errorMessage,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (data.user) {
+        // Check if user has admin role
+        const { data: roles, error: roleError } = await supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", data.user.id)
+          .single();
+
+        if (roleError || roles?.role !== "admin") {
+          // Sign out if not admin
+          await supabase.auth.signOut();
+          toast({
+            title: "Access Denied",
+            description: "You do not have administrator privileges.",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        toast({
+          title: "Admin Login Successful",
+          description: "Welcome to the Admin Dashboard!",
+        });
+        navigate("/admin");
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "An unexpected error occurred. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
       setIsLoading(false);
-      navigate("/admin");
-    }, 1500);
+    }
   };
 
   return (
