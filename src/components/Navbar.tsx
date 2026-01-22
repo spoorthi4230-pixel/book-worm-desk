@@ -25,7 +25,7 @@ export const Navbar = () => {
           </div>
           <div className="flex flex-col">
             <span className="font-serif text-lg font-bold text-foreground leading-tight">
-              Velvet
+              Velvet Page
             </span>
           </div>
         </Link>
