@@ -172,8 +172,8 @@ const IssueReturn = () => {
     try {
       // Create transaction - use type assertion for new table
       const dueDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-      const transactionInsert = supabase
-        .from("book_transactions" as "profiles")
+      const { error: transactionError } = await supabase
+        .from("book_transactions" as any)
         .insert([{
           book_id: foundBook.id,
           user_id: foundProfile.user_id,
@@ -181,19 +181,15 @@ const IssueReturn = () => {
           type: "issue",
           issue_date: new Date().toISOString(),
           due_date: dueDate.toISOString(),
-        }] as never);
-      
-      const { error: transactionError } = await (transactionInsert as unknown as Promise<{ error: Error | null }>);
+        }]);
 
       if (transactionError) throw transactionError;
 
       // Update book availability
-      const bookUpdate = supabase
-        .from("books" as "profiles")
-        .update({ available: false } as never)
+      const { error: bookError } = await supabase
+        .from("books" as any)
+        .update({ available: false })
         .eq("id", foundBook.id);
-      
-      const { error: bookError } = await (bookUpdate as unknown as Promise<{ error: Error | null }>);
 
       if (bookError) throw bookError;
 
@@ -234,21 +230,21 @@ const IssueReturn = () => {
       }
       
       const { data: transaction, error: findError } = await (supabase
-        .from("book_transactions" as "profiles")
+        .from("book_transactions" as any)
         .select("*")
         .eq("book_id", foundBook.id)
         .eq("type", "issue")
         .is("return_date", null)
         .order("created_at", { ascending: false })
         .limit(1)
-        .maybeSingle() as unknown as Promise<{ data: TransactionRecord | null; error: Error | null }>);
+        .maybeSingle()) as { data: TransactionRecord | null; error: any };
 
       if (findError) throw findError;
 
       if (transaction) {
         // Create return transaction
-        const returnInsert = supabase
-          .from("book_transactions" as "profiles")
+        const { error: transactionError } = await supabase
+          .from("book_transactions" as any)
           .insert([{
             book_id: foundBook.id,
             user_id: transaction.user_id,
@@ -257,28 +253,22 @@ const IssueReturn = () => {
             issue_date: transaction.issue_date,
             due_date: transaction.due_date,
             return_date: new Date().toISOString(),
-          }] as never);
-        
-        const { error: transactionError } = await (returnInsert as unknown as Promise<{ error: Error | null }>);
+          }]);
 
         if (transactionError) throw transactionError;
 
         // Update the original issue transaction with return date
-        const updateOriginal = supabase
-          .from("book_transactions" as "profiles")
-          .update({ return_date: new Date().toISOString() } as never)
+        await supabase
+          .from("book_transactions" as any)
+          .update({ return_date: new Date().toISOString() })
           .eq("id", transaction.id);
-        
-        await (updateOriginal as unknown as Promise<{ error: Error | null }>);
       }
 
       // Update book availability
-      const bookUpdate = supabase
-        .from("books" as "profiles")
-        .update({ available: true } as never)
+      const { error: bookError } = await supabase
+        .from("books" as any)
+        .update({ available: true })
         .eq("id", foundBook.id);
-      
-      const { error: bookError } = await (bookUpdate as unknown as Promise<{ error: Error | null }>);
 
       if (bookError) throw bookError;
 
